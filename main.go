@@ -30,7 +30,7 @@ type (
 		Scenarios   []scenario `json:"scenarios"`
 	}
 	scenarioResult struct {
-		Name  string
+		scenario
 		Data  []time.Duration
 		Mean  time.Duration
 		Stdev time.Duration
@@ -109,10 +109,10 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	res, mean, sdev = runScenario(cfg.Count, scenario, cfg)
 	fmt.Println()
 	return scenarioResult{
-		Name:  scenario.Name,
-		Data:  res,
-		Mean:  mean,
-		Stdev: sdev,
+		scenario: *scenario,
+		Data:     res,
+		Mean:     mean,
+		Stdev:    sdev,
 	}
 }
 
