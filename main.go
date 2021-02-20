@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -29,9 +30,10 @@ type (
 		Scenarios   []scenario `json:"scenarios"`
 	}
 	scenarioResult struct {
-		Name    string
-		Data    []float64
-		Average float64
+		Name  string
+		Data  []time.Duration
+		Mean  time.Duration
+		Stdev time.Duration
 	}
 )
 
@@ -54,7 +56,7 @@ func main() {
 	}
 
 	// ****
-	fmt.Println("\nResults in ms:\n")
+	fmt.Println("\nResults:\n")
 	for scidx := 0; scidx < len(resScenario); scidx++ {
 		fmt.Printf(" %v \t", resScenario[scidx].Name)
 	}
@@ -65,9 +67,10 @@ func main() {
 		}
 		fmt.Println()
 	}
-	fmt.Println("\n= AVG =")
+	fmt.Println("\n= Summary =")
+	fmt.Printf("\nName\t\t\tMean\t\t\tStdev\n")
 	for scidx := 0; scidx < len(resScenario); scidx++ {
-		fmt.Printf("  %.4f \t", resScenario[scidx].Average)
+		fmt.Printf("%v\t\t%v\t%v\n", resScenario[scidx].Name, resScenario[scidx].Mean, resScenario[scidx].Stdev)
 	}
 	fmt.Println()
 }
@@ -101,31 +104,42 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	cmd := getProcessCmd(scenario, cfg)
 	fmt.Printf("Scenario: %v => %v\n", scenario.Name, cmd.Args)
 	fmt.Print("  Warming up... ")
-	res, avg := runScenario(cfg.WarmUpCount, scenario, cfg)
+	res, mean, sdev := runScenario(cfg.WarmUpCount, scenario, cfg)
 	fmt.Print("  Run... ")
-	res, avg = runScenario(cfg.Count, scenario, cfg)
+	res, mean, sdev = runScenario(cfg.Count, scenario, cfg)
 	fmt.Println()
 	return scenarioResult{
-		Name:    scenario.Name,
-		Data:    res,
-		Average: avg,
+		Name:  scenario.Name,
+		Data:  res,
+		Mean:  mean,
+		Stdev: sdev,
 	}
 }
 
-func runScenario(count int, scenario *scenario, cfg *config) ([]float64, float64) {
-	var res []float64
+func runScenario(count int, scenario *scenario, cfg *config) ([]time.Duration, time.Duration, time.Duration) {
+	var res []time.Duration
 	for i := 0; i < count; i++ {
 		exec := timeCmd(getProcessCmd(scenario, cfg))
 		res = append(res, exec)
 	}
 	fmt.Printf(" %v = ", res)
+
 	var total float64 = 0
 	for _, value := range res {
-		total += value
+		total += float64(value.Nanoseconds())
 	}
-	avg := total / float64(len(res))
-	fmt.Println(avg)
-	return res, avg
+	mean := total / float64(len(res))
+
+	var sdev float64 = 0
+	for _, value := range res {
+		sdev += math.Pow(float64(value.Nanoseconds())-mean, 2)
+	}
+	sdev = math.Sqrt(sdev / float64(len(res)))
+
+	meanDuration := time.Duration(mean)
+	sdevDuration := time.Duration(sdev)
+	fmt.Println(meanDuration)
+	return res, meanDuration, sdevDuration
 }
 
 func getProcessCmd(scenario *scenario, cfg *config) *exec.Cmd {
@@ -169,11 +183,11 @@ func getProcessCmd(scenario *scenario, cfg *config) *exec.Cmd {
 	return cmd
 }
 
-func timeCmd(cmd *exec.Cmd) float64 {
+func timeCmd(cmd *exec.Cmd) time.Duration {
 	now := time.Now()
 	err := cmd.Run()
 	if err != nil {
 		fmt.Println(err)
 	}
-	return float64(time.Now().Sub(now).Nanoseconds()) / 1_000_000
+	return time.Now().Sub(now)
 }
