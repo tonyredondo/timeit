@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -35,21 +36,10 @@ type (
 )
 
 func main() {
-	jsonFile, err := os.Open(os.Args[1])
+	cfg, err := loadConfiguration()
 	if err != nil {
 		fmt.Println(err)
-	}
-	defer jsonFile.Close()
-
-	jsonBytes, err := ioutil.ReadAll(jsonFile)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	var cfg config
-	err = json.Unmarshal(jsonBytes, &cfg)
-	if err != nil {
-		fmt.Println(err)
+		return
 	}
 
 	fmt.Printf("Warmup count: %v\n", cfg.WarmUpCount)
@@ -59,7 +49,7 @@ func main() {
 	var resScenario []scenarioResult
 	if cfg.Count > 0 && len(cfg.Scenarios) > 0 {
 		for _, scenario := range cfg.Scenarios {
-			resScenario = append(resScenario, processScenario(&scenario, &cfg))
+			resScenario = append(resScenario, processScenario(&scenario, cfg))
 		}
 	}
 
@@ -80,6 +70,31 @@ func main() {
 		fmt.Printf("  %.4f \t", resScenario[scidx].Average)
 	}
 	fmt.Println()
+}
+
+func loadConfiguration() (*config, error) {
+	if len(os.Args) < 2 {
+		return nil, errors.New("missing argument with the configuration file")
+	}
+
+	jsonFile, err := os.Open(os.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	defer jsonFile.Close()
+
+	jsonBytes, err2 := ioutil.ReadAll(jsonFile)
+	if err2 != nil {
+		return nil, err2
+	}
+
+	var cfg config
+	err = json.Unmarshal(jsonBytes, &cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
 }
 
 func processScenario(scenario *scenario, cfg *config) scenarioResult {
