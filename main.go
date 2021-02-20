@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/olekukonko/tablewriter"
 	"io/ioutil"
 	"math"
 	"os"
@@ -56,22 +57,39 @@ func main() {
 	}
 
 	// ****
-	fmt.Println("\nResults:\n")
+	fmt.Println("\n### Results\n")
+	resultTable := tablewriter.NewWriter(os.Stdout)
+	resultTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
+	resultTable.SetCenterSeparator("|")
+	resultTable.SetHeaderAlignment(tablewriter.ALIGN_CENTER)
+	resultTable.SetAlignment(tablewriter.ALIGN_CENTER)
+	var resultHeader []string
 	for scidx := 0; scidx < len(resScenario); scidx++ {
-		fmt.Printf(" %v \t", resScenario[scidx].Name)
+		resultHeader = append(resultHeader, resScenario[scidx].Name)
 	}
-	fmt.Println()
+	resultTable.SetHeader(resultHeader)
 	for idx := 0; idx < cfg.Count; idx++ {
+		var resultRow []string
 		for scidx := 0; scidx < len(resScenario); scidx++ {
-			fmt.Printf("  %v \t", resScenario[scidx].Data[idx])
+			resultRow = append(resultRow, fmt.Sprint(resScenario[scidx].Data[idx]))
 		}
-		fmt.Println()
+		resultTable.Append(resultRow)
 	}
-	fmt.Println("\n= Summary =")
-	fmt.Printf("\nName\t\t\tMean\t\t\tStdev\n")
+	resultTable.Render()
+
+	fmt.Println("\n### Summary\n")
+	summaryTable := tablewriter.NewWriter(os.Stdout)
+	summaryTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
+	summaryTable.SetCenterSeparator("|")
+	summaryTable.SetHeader([]string{"Name", "Mean", "Stdev"})
 	for scidx := 0; scidx < len(resScenario); scidx++ {
-		fmt.Printf("%v\t\t%v\t%v\n", resScenario[scidx].Name, resScenario[scidx].Mean, resScenario[scidx].Stdev)
+		summaryTable.Append([]string {
+			resScenario[scidx].Name,
+			fmt.Sprint(resScenario[scidx].Mean),
+			fmt.Sprint(resScenario[scidx].Stdev),
+		})
 	}
+	summaryTable.Render()
 	fmt.Println()
 }
 
