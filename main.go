@@ -45,6 +45,7 @@ func main() {
 	cfg, err := loadConfiguration()
 	if err != nil {
 		fmt.Println(err)
+		os.Exit(-1)
 		return
 	}
 
@@ -52,6 +53,7 @@ func main() {
 	fmt.Printf("Count: %v\n", cfg.Count)
 	fmt.Printf("Number of scenarios: %v\n\n", len(cfg.Scenarios))
 
+	// process each scenario
 	var resScenario []scenarioResult
 	if cfg.Count > 0 && len(cfg.Scenarios) > 0 {
 		for _, scenario := range cfg.Scenarios {
@@ -59,7 +61,11 @@ func main() {
 		}
 	}
 
-	// ****
+	// print results in a table
+	printResultsTable(resScenario, cfg)
+}
+
+func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	fmt.Println("\n### Results\n")
 	resultTable := tablewriter.NewWriter(os.Stdout)
 	resultTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
