@@ -1,4 +1,5 @@
 {
+  "enableDatadog": true,
   "warmUpCount": 10,
   "count": 50,
   "scenarios": [

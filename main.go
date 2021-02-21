@@ -12,6 +12,8 @@ import (
 
 	"github.com/montanaflynn/stats"
 	"github.com/olekukonko/tablewriter"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
 type (
@@ -27,9 +29,10 @@ type (
 	}
 	config struct {
 		processData
-		WarmUpCount int        `json:"warmUpCount"`
-		Count       int        `json:"count"`
-		Scenarios   []scenario `json:"scenarios"`
+		WarmUpCount   int        `json:"warmUpCount"`
+		Count         int        `json:"count"`
+		EnableDatadog bool       `json:"enableDatadog"`
+		Scenarios     []scenario `json:"scenarios"`
 	}
 	scenarioResult struct {
 		scenario
@@ -64,6 +67,44 @@ func main() {
 
 	// print results in a table
 	printResultsTable(resScenario, cfg)
+
+	if cfg.EnableDatadog {
+		// send traces and span data
+		sendTraceData(resScenario, cfg)
+	}
+}
+
+func sendTraceData(resScenario []scenarioResult, cfg *config) {
+	if len(resScenario) > 0 {
+		tracer.Start()
+		defer tracer.Stop()
+
+		for _, scenario := range resScenario {
+			pName := scenario.ProcessName
+			if pName == nil {
+				pName = cfg.ProcessName
+			}
+			pArgs := scenario.ProcessArguments
+			if pArgs == nil {
+				pArgs = cfg.ProcessArguments
+			}
+			span := tracer.StartSpan("time-it")
+			timeDuration := time.Now().Add(time.Duration(scenario.Mean))
+			span.SetTag(ext.ResourceName, fmt.Sprintf("%v (%v %v)", scenario.Name, *pName, *pArgs))
+			span.SetTag(ext.ServiceName, *pName)
+			span.SetTag("scenario.name", scenario.Name)
+			span.SetTag("scenario.mean", scenario.Mean)
+			span.SetTag("scenario.stdev", scenario.Stdev)
+			span.SetTag("scenario.p90", scenario.P90)
+			span.SetTag("scenario.p95", scenario.P95)
+			span.SetTag("scenario.p99", scenario.P99)
+			span.SetTag("configuration.count", cfg.Count)
+			span.SetTag("configuration.warmup_count", cfg.WarmUpCount)
+			span.SetTag("process.name", *pName)
+			span.SetTag("process.arguments", *pArgs)
+			span.Finish(tracer.FinishTime(timeDuration))
+		}
+	}
 }
 
 func printResultsTable(resScenario []scenarioResult, cfg *config) {
