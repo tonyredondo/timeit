@@ -43,6 +43,7 @@ type (
 		P95   float64
 		P90   float64
 	}
+	myLogger struct{}
 )
 
 func main() {
@@ -76,7 +77,7 @@ func main() {
 
 func sendTraceData(resScenario []scenarioResult, cfg *config) {
 	if len(resScenario) > 0 {
-		tracer.Start()
+		tracer.Start(tracer.WithLogger(myLogger{}), tracer.WithAnalytics(true))
 		defer tracer.Stop()
 
 		for _, scenario := range resScenario {
@@ -90,6 +91,17 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			}
 			span := tracer.StartSpan("time-it")
 			timeDuration := time.Now().Add(time.Duration(scenario.Mean))
+
+			for _, datum := range scenario.Data {
+				child := tracer.StartSpan("time-it-run", tracer.ChildOf(span.Context()))
+				childDuration := time.Now().Add(time.Duration(datum))
+				child.SetTag(ext.ResourceName, fmt.Sprintf("%v execution of %v %v", scenario.Name, *pName, *pArgs))
+				child.SetTag(ext.ServiceName, *pName)
+				child.SetTag("process.name", *pName)
+				child.SetTag("process.arguments", *pArgs)
+				child.Finish(tracer.FinishTime(childDuration))
+			}
+
 			span.SetTag(ext.ResourceName, fmt.Sprintf("%v (%v %v)", scenario.Name, *pName, *pArgs))
 			span.SetTag(ext.ServiceName, *pName)
 			span.SetTag("scenario.name", scenario.Name)
@@ -270,4 +282,10 @@ func timeCmd(cmd *exec.Cmd) float64 {
 		fmt.Println(err)
 	}
 	return float64(time.Now().Sub(now))
+}
+
+func (l myLogger) Log(msg string) {
+	if strings.Index(msg, "INFO:") == -1 {
+		fmt.Printf("%v\n", msg)
+	}
 }
