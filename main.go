@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/montanaflynn/stats"
-	"github.com/olekukonko/tablewriter"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/montanaflynn/stats"
+	"github.com/olekukonko/tablewriter"
 )
 
 type (
