@@ -32,11 +32,11 @@ type (
 	}
 	scenarioResult struct {
 		scenario
-		Data  []time.Duration
-		Mean  time.Duration
-		Stdev time.Duration
-		P99   time.Duration
-		P90   time.Duration
+		Data  []float64
+		Mean  float64
+		Stdev float64
+		P99   float64
+		P90   float64
 	}
 )
 
@@ -73,7 +73,7 @@ func main() {
 	for idx := 0; idx < cfg.Count; idx++ {
 		var resultRow []string
 		for scidx := 0; scidx < len(resScenario); scidx++ {
-			resultRow = append(resultRow, fmt.Sprint(resScenario[scidx].Data[idx]))
+			resultRow = append(resultRow, fmt.Sprint(time.Duration(resScenario[scidx].Data[idx])))
 		}
 		resultTable.Append(resultRow)
 	}
@@ -87,10 +87,10 @@ func main() {
 	for scidx := 0; scidx < len(resScenario); scidx++ {
 		summaryTable.Append([]string{
 			resScenario[scidx].Name,
-			fmt.Sprint(resScenario[scidx].Mean),
-			fmt.Sprint(resScenario[scidx].Stdev),
-			fmt.Sprint(resScenario[scidx].P99),
-			fmt.Sprint(resScenario[scidx].P90),
+			fmt.Sprint(time.Duration(resScenario[scidx].Mean)),
+			fmt.Sprint(time.Duration(resScenario[scidx].Stdev)),
+			fmt.Sprint(time.Duration(resScenario[scidx].P99)),
+			fmt.Sprint(time.Duration(resScenario[scidx].P90)),
 		})
 	}
 	summaryTable.Render()
@@ -125,47 +125,46 @@ func loadConfiguration() (*config, error) {
 func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	cmd := getProcessCmd(scenario, cfg)
 	fmt.Printf("Scenario: %v => %v\n", scenario.Name, cmd.Args)
-	fmt.Print("  Warming up... ")
-	resDuration, resFloat := runScenario(cfg.WarmUpCount, scenario, cfg)
-	fmt.Print("  Run... ")
-	resDuration, resFloat = runScenario(cfg.Count, scenario, cfg)
+	fmt.Print("  Warming up")
+	res := runScenario(cfg.WarmUpCount, scenario, cfg)
+	fmt.Print("  Run")
+	res = runScenario(cfg.Count, scenario, cfg)
 	fmt.Println()
-	mean, err := stats.Mean(resFloat)
+	mean, err := stats.Mean(res)
 	if err != nil {
 		fmt.Println(err)
 	}
-	stdev, err := stats.StandardDeviation(resFloat)
+	stdev, err := stats.StandardDeviation(res)
 	if err != nil {
 		fmt.Println(err)
 	}
-	p99, err := stats.Percentile(resFloat, 99)
+	p99, err := stats.Percentile(res, 99)
 	if err != nil {
 		fmt.Println(err)
 	}
-	p90, err := stats.Percentile(resFloat, 90)
+	p90, err := stats.Percentile(res, 90)
 	if err != nil {
 		fmt.Println(err)
 	}
 	return scenarioResult{
 		scenario: *scenario,
-		Data:     resDuration,
-		Mean:     time.Duration(mean),
-		Stdev:    time.Duration(stdev),
-		P99:      time.Duration(p99),
-		P90:      time.Duration(p90),
+		Data:     res,
+		Mean:     mean,
+		Stdev:    stdev,
+		P99:      p99,
+		P90:      p90,
 	}
 }
 
-func runScenario(count int, scenario *scenario, cfg *config) ([]time.Duration, []float64) {
-	var resDuration []time.Duration
-	var resFloat []float64
+func runScenario(count int, scenario *scenario, cfg *config) []float64 {
+	var res []float64
 	for i := 0; i < count; i++ {
 		exec := timeCmd(getProcessCmd(scenario, cfg))
-		resDuration = append(resDuration, exec)
-		resFloat = append(resFloat, float64(exec))
+		res = append(res, exec)
+		fmt.Print(".")
 	}
-	fmt.Printf(" %v\n", resDuration)
-	return resDuration, resFloat
+	fmt.Println()
+	return res
 }
 
 func getProcessCmd(scenario *scenario, cfg *config) *exec.Cmd {
@@ -209,11 +208,11 @@ func getProcessCmd(scenario *scenario, cfg *config) *exec.Cmd {
 	return cmd
 }
 
-func timeCmd(cmd *exec.Cmd) time.Duration {
+func timeCmd(cmd *exec.Cmd) float64 {
 	now := time.Now()
 	err := cmd.Run()
 	if err != nil {
 		fmt.Println(err)
 	}
-	return time.Now().Sub(now)
+	return float64(time.Now().Sub(now))
 }

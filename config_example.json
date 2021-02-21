@@ -1,6 +1,6 @@
 {
   "warmUpCount": 10,
-  "count": 20,
+  "count": 50,
   "scenarios": [
     {
       "name": "Callsite",
