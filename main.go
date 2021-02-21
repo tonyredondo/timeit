@@ -37,6 +37,7 @@ type (
 		Mean  float64
 		Stdev float64
 		P99   float64
+		P95   float64
 		P90   float64
 	}
 )
@@ -90,13 +91,14 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	summaryTable := tablewriter.NewWriter(os.Stdout)
 	summaryTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	summaryTable.SetCenterSeparator("|")
-	summaryTable.SetHeader([]string{"Name", "Mean", "Stdev", "P99", "P90"})
+	summaryTable.SetHeader([]string{"Name", "Mean", "Stdev", "P99", "P95", "P90"})
 	for scidx := 0; scidx < len(resScenario); scidx++ {
 		summaryTable.Append([]string{
 			resScenario[scidx].Name,
 			fmt.Sprint(time.Duration(resScenario[scidx].Mean)),
 			fmt.Sprint(time.Duration(resScenario[scidx].Stdev)),
 			fmt.Sprint(time.Duration(resScenario[scidx].P99)),
+			fmt.Sprint(time.Duration(resScenario[scidx].P95)),
 			fmt.Sprint(time.Duration(resScenario[scidx].P90)),
 		})
 	}
@@ -149,6 +151,10 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	if err != nil {
 		fmt.Println(err)
 	}
+	p95, err := stats.Percentile(res, 95)
+	if err != nil {
+		fmt.Println(err)
+	}
 	p90, err := stats.Percentile(res, 90)
 	if err != nil {
 		fmt.Println(err)
@@ -159,6 +165,7 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 		Mean:     mean,
 		Stdev:    stdev,
 		P99:      p99,
+		P95:      p95,
 		P90:      p90,
 	}
 }
