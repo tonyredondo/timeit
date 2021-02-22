@@ -36,12 +36,19 @@ type (
 	}
 	scenarioResult struct {
 		scenario
-		Data  []float64
-		Mean  float64
-		Stdev float64
-		P99   float64
-		P95   float64
-		P90   float64
+		scenarioDataPoint
+		Data      []scenarioDataPoint
+		DataFloat []float64
+		Mean      float64
+		Stdev     float64
+		P99       float64
+		P95       float64
+		P90       float64
+	}
+	scenarioDataPoint struct {
+		start    time.Time
+		end      time.Time
+		duration time.Duration
 	}
 	myLogger struct{}
 )
@@ -89,21 +96,25 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			if pArgs == nil {
 				pArgs = cfg.ProcessArguments
 			}
-			span := tracer.StartSpan("time-it")
-			timeDuration := time.Now().Add(time.Duration(scenario.Mean))
+			span := tracer.StartSpan("time-it", tracer.StartTime(scenario.start))
 
 			for _, datum := range scenario.Data {
-				child := tracer.StartSpan("time-it-run", tracer.ChildOf(span.Context()))
-				childDuration := time.Now().Add(time.Duration(datum))
+				child := tracer.StartSpan("time-it-run", tracer.ChildOf(span.Context()), tracer.StartTime(datum.start))
 				child.SetTag(ext.ResourceName, fmt.Sprintf("%v execution of %v %v", scenario.Name, *pName, *pArgs))
 				child.SetTag(ext.ServiceName, *pName)
+				child.SetTag(ext.SpanType, "benchmark")
+				child.SetTag(ext.AnalyticsEvent, true)
+				child.SetTag(ext.ManualKeep, true)
 				child.SetTag("process.name", *pName)
 				child.SetTag("process.arguments", *pArgs)
-				child.Finish(tracer.FinishTime(childDuration))
+				child.Finish(tracer.FinishTime(datum.end))
 			}
 
 			span.SetTag(ext.ResourceName, fmt.Sprintf("%v (%v %v)", scenario.Name, *pName, *pArgs))
 			span.SetTag(ext.ServiceName, *pName)
+			span.SetTag(ext.SpanType, "benchmark")
+			span.SetTag(ext.AnalyticsEvent, true)
+			span.SetTag(ext.ManualKeep, true)
 			span.SetTag("scenario.name", scenario.Name)
 			span.SetTag("scenario.mean", scenario.Mean)
 			span.SetTag("scenario.stdev", scenario.Stdev)
@@ -114,7 +125,7 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			span.SetTag("configuration.warmup_count", cfg.WarmUpCount)
 			span.SetTag("process.name", *pName)
 			span.SetTag("process.arguments", *pArgs)
-			span.Finish(tracer.FinishTime(timeDuration))
+			span.Finish(tracer.FinishTime(scenario.end))
 		}
 	}
 }
@@ -134,7 +145,7 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	for idx := 0; idx < cfg.Count; idx++ {
 		var resultRow []string
 		for scidx := 0; scidx < len(resScenario); scidx++ {
-			resultRow = append(resultRow, fmt.Sprint(time.Duration(resScenario[scidx].Data[idx])))
+			resultRow = append(resultRow, fmt.Sprint(time.Duration(resScenario[scidx].DataFloat[idx])))
 		}
 		resultTable.Append(resultRow)
 	}
@@ -188,46 +199,59 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	cmd := getProcessCmd(scenario, cfg)
 	fmt.Printf("Scenario: %v => %v\n", scenario.Name, cmd.Args)
 	fmt.Print("  Warming up")
-	res := runScenario(cfg.WarmUpCount, scenario, cfg)
+	_ = runScenario(cfg.WarmUpCount, scenario, cfg)
 	fmt.Print("  Run")
-	res = runScenario(cfg.Count, scenario, cfg)
+	start := time.Now()
+	res := runScenario(cfg.Count, scenario, cfg)
+	end := time.Now()
 	fmt.Println()
-	mean, err := stats.Mean(res)
+
+	var durations []float64
+	for _, item := range res {
+		durations = append(durations, float64(item.duration))
+	}
+
+	mean, err := stats.Mean(durations)
 	if err != nil {
 		fmt.Println(err)
 	}
-	stdev, err := stats.StandardDeviation(res)
+	stdev, err := stats.StandardDeviation(durations)
 	if err != nil {
 		fmt.Println(err)
 	}
-	p99, err := stats.Percentile(res, 99)
+	p99, err := stats.Percentile(durations, 99)
 	if err != nil {
 		fmt.Println(err)
 	}
-	p95, err := stats.Percentile(res, 95)
+	p95, err := stats.Percentile(durations, 95)
 	if err != nil {
 		fmt.Println(err)
 	}
-	p90, err := stats.Percentile(res, 90)
+	p90, err := stats.Percentile(durations, 90)
 	if err != nil {
 		fmt.Println(err)
 	}
 	return scenarioResult{
 		scenario: *scenario,
-		Data:     res,
-		Mean:     mean,
-		Stdev:    stdev,
-		P99:      p99,
-		P95:      p95,
-		P90:      p90,
+		scenarioDataPoint: scenarioDataPoint{
+			start:    start,
+			end:      end,
+			duration: end.Sub(start),
+		},
+		Data:      res,
+		DataFloat: durations,
+		Mean:      mean,
+		Stdev:     stdev,
+		P99:       p99,
+		P95:       p95,
+		P90:       p90,
 	}
 }
 
-func runScenario(count int, scenario *scenario, cfg *config) []float64 {
-	var res []float64
+func runScenario(count int, scenario *scenario, cfg *config) []scenarioDataPoint {
+	var res []scenarioDataPoint
 	for i := 0; i < count; i++ {
-		exec := timeCmd(getProcessCmd(scenario, cfg))
-		res = append(res, exec)
+		res = append(res, timeCmd(getProcessCmd(scenario, cfg)))
 		fmt.Print(".")
 	}
 	fmt.Println()
@@ -275,13 +299,18 @@ func getProcessCmd(scenario *scenario, cfg *config) *exec.Cmd {
 	return cmd
 }
 
-func timeCmd(cmd *exec.Cmd) float64 {
-	now := time.Now()
+func timeCmd(cmd *exec.Cmd) scenarioDataPoint {
+	start := time.Now()
 	err := cmd.Run()
+	end := time.Now()
 	if err != nil {
 		fmt.Println(err)
 	}
-	return float64(time.Now().Sub(now))
+	return scenarioDataPoint{
+		start:    start,
+		end:      end,
+		duration: end.Sub(start),
+	}
 }
 
 func (l myLogger) Log(msg string) {
