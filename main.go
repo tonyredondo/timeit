@@ -49,6 +49,7 @@ type (
 		start    time.Time
 		end      time.Time
 		duration time.Duration
+		error    error
 	}
 	myLogger struct{}
 )
@@ -88,30 +89,37 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 		defer tracer.Stop()
 
 		for _, scenario := range resScenario {
-			pName := scenario.ProcessName
-			if pName == nil {
-				pName = cfg.ProcessName
+			var pName string
+			var pArgs string
+
+			if scenario.ProcessName != nil {
+				pName = *scenario.ProcessName
+			} else if cfg.ProcessName != nil {
+				pName = *cfg.ProcessName
 			}
-			pArgs := scenario.ProcessArguments
-			if pArgs == nil {
-				pArgs = cfg.ProcessArguments
+
+			if scenario.ProcessArguments != nil {
+				pArgs = *scenario.ProcessArguments
+			} else if cfg.ProcessArguments != nil {
+				pArgs = *cfg.ProcessArguments
 			}
+
 			span := tracer.StartSpan("time-it", tracer.StartTime(scenario.start))
 
 			for _, datum := range scenario.Data {
 				child := tracer.StartSpan("time-it-run", tracer.ChildOf(span.Context()), tracer.StartTime(datum.start))
-				child.SetTag(ext.ResourceName, fmt.Sprintf("%v execution of %v %v", scenario.Name, *pName, *pArgs))
-				child.SetTag(ext.ServiceName, *pName)
+				child.SetTag(ext.ResourceName, fmt.Sprintf("%v execution of %v %v", scenario.Name, pName, pArgs))
+				child.SetTag(ext.ServiceName, pName)
 				child.SetTag(ext.SpanType, "benchmark")
 				child.SetTag(ext.AnalyticsEvent, true)
 				child.SetTag(ext.ManualKeep, true)
-				child.SetTag("process.name", *pName)
-				child.SetTag("process.arguments", *pArgs)
-				child.Finish(tracer.FinishTime(datum.end))
+				child.SetTag("process.name", pName)
+				child.SetTag("process.arguments", pArgs)
+				child.Finish(tracer.FinishTime(datum.end), tracer.WithError(datum.error))
 			}
 
-			span.SetTag(ext.ResourceName, fmt.Sprintf("%v (%v %v)", scenario.Name, *pName, *pArgs))
-			span.SetTag(ext.ServiceName, *pName)
+			span.SetTag(ext.ResourceName, fmt.Sprintf("%v (%v %v)", scenario.Name, pName, pArgs))
+			span.SetTag(ext.ServiceName, pName)
 			span.SetTag(ext.SpanType, "benchmark")
 			span.SetTag(ext.AnalyticsEvent, true)
 			span.SetTag(ext.ManualKeep, true)
@@ -123,9 +131,9 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			span.SetTag("scenario.p99", scenario.P99)
 			span.SetTag("configuration.count", cfg.Count)
 			span.SetTag("configuration.warmup_count", cfg.WarmUpCount)
-			span.SetTag("process.name", *pName)
-			span.SetTag("process.arguments", *pArgs)
-			span.Finish(tracer.FinishTime(scenario.end))
+			span.SetTag("process.name", pName)
+			span.SetTag("process.arguments", pArgs)
+			span.Finish(tracer.FinishTime(scenario.end), tracer.WithError(scenario.error))
 		}
 	}
 }
@@ -168,6 +176,18 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	}
 	summaryTable.Render()
 	fmt.Println()
+
+	hasError := false
+	for scidx := 0; scidx < len(resScenario); scidx++ {
+		if resScenario[scidx].error != nil {
+			fmt.Printf("Error in Scenario: %v\n", scidx)
+			fmt.Println(resScenario[scidx].error.Error())
+			hasError = true
+		}
+	}
+	if hasError {
+		fmt.Println()
+	}
 }
 
 func loadConfiguration() (*config, error) {
@@ -207,8 +227,20 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	fmt.Println()
 
 	var durations []float64
+	mapErrors := make(map[string]bool)
 	for _, item := range res {
 		durations = append(durations, float64(item.duration))
+		if item.error != nil {
+			mapErrors[item.error.Error()] = true
+		}
+	}
+	var errorString string
+	for k, _ := range mapErrors {
+		errorString += fmt.Sprintln(k)
+	}
+	var error error
+	if errorString != "" {
+		error = errors.New(errorString)
 	}
 
 	mean, err := stats.Mean(durations)
@@ -237,6 +269,7 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 			start:    start,
 			end:      end,
 			duration: end.Sub(start),
+			error:    error,
 		},
 		Data:      res,
 		DataFloat: durations,
@@ -303,13 +336,11 @@ func timeCmd(cmd *exec.Cmd) scenarioDataPoint {
 	start := time.Now()
 	err := cmd.Run()
 	end := time.Now()
-	if err != nil {
-		fmt.Println(err)
-	}
 	return scenarioDataPoint{
 		start:    start,
 		end:      end,
 		duration: end.Sub(start),
+		error:    err,
 	}
 }
 
