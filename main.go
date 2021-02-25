@@ -183,16 +183,11 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	summaryTable.Render()
 	fmt.Println()
 
-	hasError := false
 	for scidx := 0; scidx < len(resScenario); scidx++ {
 		if resScenario[scidx].error != nil {
 			fmt.Printf("Error in Scenario: %v\n", scidx)
 			fmt.Println(resScenario[scidx].error.Error())
-			hasError = true
 		}
-	}
-	if hasError {
-		fmt.Println()
 	}
 }
 
@@ -239,7 +234,7 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	mapErrors := make(map[string]bool)
 	for _, item := range res {
 		durations = append(durations, float64(item.duration))
-		if item.error != nil {
+		if item.error != nil && item.error != context.DeadlineExceeded {
 			mapErrors[item.error.Error()] = true
 		}
 	}
