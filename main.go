@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ type (
 		scenarioDataPoint
 		Data      []scenarioDataPoint
 		DataFloat []float64
+		Outliers  []float64
 		Mean      float64
 		Stdev     float64
 		P99       float64
@@ -129,6 +131,7 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			span.SetTag("scenario.p90", scenario.P90)
 			span.SetTag("scenario.p95", scenario.P95)
 			span.SetTag("scenario.p99", scenario.P99)
+			span.SetTag("scenario.outliers", len(scenario.Outliers))
 			span.SetTag("configuration.count", cfg.Count)
 			span.SetTag("configuration.warmup_count", cfg.WarmUpCount)
 			span.SetTag("process.name", pName)
@@ -163,7 +166,7 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	summaryTable := tablewriter.NewWriter(os.Stdout)
 	summaryTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	summaryTable.SetCenterSeparator("|")
-	summaryTable.SetHeader([]string{"Name", "Mean", "Stdev", "P99", "P95", "P90"})
+	summaryTable.SetHeader([]string{"Name", "Mean", "Stdev", "P99", "P95", "P90", "Outliers"})
 	for scidx := 0; scidx < len(resScenario); scidx++ {
 		summaryTable.Append([]string{
 			resScenario[scidx].Name,
@@ -172,6 +175,7 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 			fmt.Sprint(time.Duration(resScenario[scidx].P99)),
 			fmt.Sprint(time.Duration(resScenario[scidx].P95)),
 			fmt.Sprint(time.Duration(resScenario[scidx].P90)),
+			fmt.Sprint(len(resScenario[scidx].Outliers)),
 		})
 	}
 	summaryTable.Render()
@@ -219,11 +223,15 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	cmd := getProcessCmd(scenario, cfg)
 	fmt.Printf("Scenario: %v => %v\n", scenario.Name, cmd.Args)
 	fmt.Print("  Warming up")
-	_ = runScenario(cfg.WarmUpCount, scenario, cfg)
-	fmt.Print("  Run")
 	start := time.Now()
-	res := runScenario(cfg.Count, scenario, cfg)
+	_ = runScenario(cfg.WarmUpCount, scenario, cfg)
 	end := time.Now()
+	fmt.Printf("    Duration: %v\n", end.Sub(start))
+	fmt.Print("  Run")
+	start = time.Now()
+	res := runScenario(cfg.Count, scenario, cfg)
+	end = time.Now()
+	fmt.Printf("    Duration: %v\n", end.Sub(start))
 	fmt.Println()
 
 	var durations []float64
@@ -243,26 +251,42 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 		error = errors.New(errorString)
 	}
 
-	mean, err := stats.Mean(durations)
-	if err != nil {
-		fmt.Println(err)
+	// Get outliers
+	outliers, _ := stats.QuartileOutliers(durations)
+	mildOutliers := outliers.Mild
+
+	durationsCount := len(durations)
+	outliersCount := len(mildOutliers)
+
+	// Remove outliers
+	var newDurations []float64
+	for x := 0; x < durationsCount; x++ {
+		add := true
+		for j := 0; j < outliersCount; j++ {
+			if durations[x] == mildOutliers[j] {
+				add = false
+				break
+			}
+		}
+		if add {
+			newDurations = append(newDurations, durations[x])
+		}
 	}
-	stdev, err := stats.StandardDeviation(durations)
-	if err != nil {
-		fmt.Println(err)
+
+	durations = newDurations
+	mean, _ := stats.Mean(durations)
+
+	// Add the missing datapoints removed from outliers
+	missingDurations := durationsCount - len(durations)
+	for i := 0; i < missingDurations; i++ {
+		durations = append(durations, mean)
 	}
-	p99, err := stats.Percentile(durations, 99)
-	if err != nil {
-		fmt.Println(err)
-	}
-	p95, err := stats.Percentile(durations, 95)
-	if err != nil {
-		fmt.Println(err)
-	}
-	p90, err := stats.Percentile(durations, 90)
-	if err != nil {
-		fmt.Println(err)
-	}
+
+	stdev, _ := stats.StandardDeviation(durations)
+	p99, _ := stats.Percentile(durations, 99)
+	p95, _ := stats.Percentile(durations, 95)
+	p90, _ := stats.Percentile(durations, 90)
+
 	return scenarioResult{
 		scenario: *scenario,
 		scenarioDataPoint: scenarioDataPoint{
@@ -273,6 +297,7 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 		},
 		Data:      res,
 		DataFloat: durations,
+		Outliers: mildOutliers,
 		Mean:      mean,
 		Stdev:     stdev,
 		P99:       p99,
@@ -336,6 +361,7 @@ func timeCmd(cmd *exec.Cmd) scenarioDataPoint {
 	start := time.Now()
 	err := cmd.Run()
 	end := time.Now()
+	runtime.GC()
 	return scenarioDataPoint{
 		start:    start,
 		end:      end,
