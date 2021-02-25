@@ -309,9 +309,15 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 
 func runScenario(count int, scenario *scenario, cfg *config) []scenarioDataPoint {
 	var res []scenarioDataPoint
+	fmt.Print(" ")
 	for i := 0; i < count; i++ {
-		res = append(res, runProcessCmd(scenario, cfg))
-		fmt.Print(".")
+		currentRun := runProcessCmd(scenario, cfg)
+		res = append(res, currentRun)
+		if currentRun.error != nil {
+			fmt.Print("x")
+		} else {
+			fmt.Print(".")
+		}
 	}
 	fmt.Println()
 	return res
