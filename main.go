@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ type (
 	processData struct {
 		ProcessName          *string           `json:"processName"`
 		ProcessArguments     *string           `json:"processArguments"`
+		ProcessTimeout       int               `json:"processTimeout"`
 		WorkingDirectory     *string           `json:"workingDirectory"`
 		EnvironmentVariables map[string]string `json:"environmentVariables"`
 	}
@@ -220,8 +222,7 @@ func loadConfiguration() (*config, error) {
 }
 
 func processScenario(scenario *scenario, cfg *config) scenarioResult {
-	cmd := getProcessCmd(scenario, cfg)
-	fmt.Printf("Scenario: %v => %v\n", scenario.Name, cmd.Args)
+	fmt.Printf("Scenario: %v\n", scenario.Name)
 	fmt.Print("  Warming up")
 	start := time.Now()
 	_ = runScenario(cfg.WarmUpCount, scenario, cfg)
@@ -297,7 +298,7 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 		},
 		Data:      res,
 		DataFloat: durations,
-		Outliers: mildOutliers,
+		Outliers:  mildOutliers,
 		Mean:      mean,
 		Stdev:     stdev,
 		P99:       p99,
@@ -309,14 +310,14 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 func runScenario(count int, scenario *scenario, cfg *config) []scenarioDataPoint {
 	var res []scenarioDataPoint
 	for i := 0; i < count; i++ {
-		res = append(res, timeCmd(getProcessCmd(scenario, cfg)))
+		res = append(res, runProcessCmd(scenario, cfg))
 		fmt.Print(".")
 	}
 	fmt.Println()
 	return res
 }
 
-func getProcessCmd(scenario *scenario, cfg *config) *exec.Cmd {
+func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	var cmdString string
 	if scenario.ProcessName != nil {
 		cmdString = *scenario.ProcessName
@@ -346,22 +347,34 @@ func getProcessCmd(scenario *scenario, cfg *config) *exec.Cmd {
 		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	cmdTimeout := 0
+	if scenario.ProcessTimeout > 0 {
+		cmdTimeout = scenario.ProcessTimeout
+	} else if cfg.ProcessTimeout > 0 {
+		cmdTimeout = cfg.ProcessTimeout
+	}
+
+	defer runtime.GC()
+
+	ctx := context.Background()
+	if cmdTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(cmdTimeout)*time.Second)
+		defer cancel()
+	}
+
 	var cmd *exec.Cmd
 	if len(cmdArguments) > 0 {
-		cmd = exec.Command(cmdString, strings.Split(cmdArguments, " ")...)
+		cmd = exec.CommandContext(ctx, cmdString, strings.Split(cmdArguments, " ")...)
 	} else {
-		cmd = exec.Command(cmdString)
+		cmd = exec.CommandContext(ctx, cmdString)
 	}
 	cmd.Dir = workingDirectory
 	cmd.Env = cmdEnv
-	return cmd
-}
 
-func timeCmd(cmd *exec.Cmd) scenarioDataPoint {
 	start := time.Now()
 	err := cmd.Run()
 	end := time.Now()
-	runtime.GC()
 	return scenarioDataPoint{
 		start:    start,
 		end:      end,
