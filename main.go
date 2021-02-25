@@ -376,6 +376,10 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	start := time.Now()
 	err := cmd.Run()
 	end := time.Now()
+
+	if ctx.Err() == context.DeadlineExceeded {
+		err = ctx.Err()
+	}
 	return scenarioDataPoint{
 		start:    start,
 		end:      end,
