@@ -169,6 +169,34 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	}
 	resultTable.Render()
 
+	fmt.Println("\n### Outliers\n")
+	outliersTable := tablewriter.NewWriter(os.Stdout)
+	outliersTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
+	outliersTable.SetCenterSeparator("|")
+	outliersTable.SetHeaderAlignment(tablewriter.ALIGN_CENTER)
+	outliersTable.SetAlignment(tablewriter.ALIGN_CENTER)
+	outliersTable.SetHeader(resultHeader)
+	maxOutliersLength := 0
+	for scidx := 0; scidx < len(resScenario); scidx++ {
+		outLength := len(resScenario[scidx].Outliers)
+		if maxOutliersLength < outLength {
+			maxOutliersLength = outLength
+		}
+	}
+	for idx := 0; idx < maxOutliersLength; idx++ {
+		var resultRow []string
+		for scidx := 0; scidx < len(resScenario); scidx++ {
+			outliersArray := resScenario[scidx].Outliers
+			if idx < len(outliersArray) {
+				resultRow = append(resultRow, fmt.Sprint(time.Duration(outliersArray[idx])))
+			} else {
+				resultRow = append(resultRow, " - ")
+			}
+		}
+		outliersTable.Append(resultRow)
+	}
+	outliersTable.Render()
+
 	fmt.Println("\n### Summary\n")
 	summaryTable := tablewriter.NewWriter(os.Stdout)
 	summaryTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
@@ -254,17 +282,17 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 
 	// Get outliers
 	outliers, _ := stats.QuartileOutliers(durations)
-	mildOutliers := outliers.Mild
+	extremeOutliers := outliers.Extreme
 
 	durationsCount := len(durations)
-	outliersCount := len(mildOutliers)
+	outliersCount := len(extremeOutliers)
 
 	// Remove outliers
 	var newDurations []float64
 	for x := 0; x < durationsCount; x++ {
 		add := true
 		for j := 0; j < outliersCount; j++ {
-			if durations[x] == mildOutliers[j] {
+			if durations[x] == extremeOutliers[j] {
 				add = false
 				break
 			}
@@ -298,7 +326,7 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 		},
 		Data:      res,
 		DataFloat: durations,
-		Outliers:  mildOutliers,
+		Outliers:  extremeOutliers,
 		Mean:      mean,
 		Stdev:     stdev,
 		P99:       p99,
