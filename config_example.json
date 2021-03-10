@@ -27,12 +27,17 @@
   ],
   "processName": "dotnet",
   "processArguments": "--version",
-  "processTimeout": 10,
+  "processTimeout": 15,
   "environmentVariables": {
     "CORECLR_ENABLE_PROFILING": "1",
     "CORECLR_PROFILER": "{846F5F1C-F9AE-4B07-969E-05C26BC060D8}",
     "CORECLR_PROFILER_PATH": "/Datadog.Trace.ClrProfiler.Native.dylib",
     "DD_DOTNET_TRACER_HOME": "/",
     "DD_INTEGRATIONS": "/integrations.json"
+  },
+  "timeout" : {
+    "maxDuration": 15,
+    "processName": "dotnet-dump",
+    "processArguments": "collect --process-id %pid%"
   }
 }

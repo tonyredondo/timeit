@@ -19,12 +19,17 @@ import (
 )
 
 type (
+	timeout struct {
+		MaxDuration      int     `json:"maxDuration"`
+		ProcessName      *string `json:"processName"`
+		ProcessArguments *string `json:"processArguments"`
+	}
 	processData struct {
 		ProcessName          *string           `json:"processName"`
 		ProcessArguments     *string           `json:"processArguments"`
-		ProcessTimeout       int               `json:"processTimeout"`
 		WorkingDirectory     *string           `json:"workingDirectory"`
 		EnvironmentVariables map[string]string `json:"environmentVariables"`
+		Timeout              timeout           `json:"timeout"`
 	}
 	scenario struct {
 		processData
@@ -349,20 +354,30 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 
 	cmdTimeout := 0
-	if scenario.ProcessTimeout > 0 {
-		cmdTimeout = scenario.ProcessTimeout
-	} else if cfg.ProcessTimeout > 0 {
-		cmdTimeout = cfg.ProcessTimeout
+	if scenario.Timeout.MaxDuration > 0 {
+		cmdTimeout = scenario.Timeout.MaxDuration
+	} else if cfg.Timeout.MaxDuration > 0 {
+		cmdTimeout = cfg.Timeout.MaxDuration
+	}
+
+	var timeoutCmdString string
+	if scenario.Timeout.ProcessName != nil {
+		timeoutCmdString = *scenario.Timeout.ProcessName
+	} else if cfg.Timeout.ProcessName != nil {
+		timeoutCmdString = *cfg.Timeout.ProcessName
+	}
+
+	var timeoutCmdArguments string
+	if scenario.Timeout.ProcessArguments != nil {
+		timeoutCmdArguments = *scenario.Timeout.ProcessArguments
+	} else if cfg.Timeout.ProcessArguments != nil {
+		timeoutCmdArguments = *cfg.Timeout.ProcessArguments
 	}
 
 	defer runtime.GC()
 
-	ctx := context.Background()
-	if cmdTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(cmdTimeout)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	var cmd *exec.Cmd
 	if len(cmdArguments) > 0 {
@@ -372,6 +387,32 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 	cmd.Dir = workingDirectory
 	cmd.Env = cmdEnv
+
+	if cmdTimeout > 0 {
+		go func() {
+			select {
+			case <-time.After(time.Duration(cmdTimeout) * time.Second):
+				if timeoutCmdString != "" {
+					fmt.Printf("[%v]", cmd.Process.Pid)
+					timeoutCmdString = strings.ReplaceAll(timeoutCmdString, "%pid%", fmt.Sprint(cmd.Process.Pid))
+					timeoutCmdArguments = strings.ReplaceAll(timeoutCmdArguments, "%pid%", fmt.Sprint(cmd.Process.Pid))
+					var timeoutCmd *exec.Cmd
+					if len(timeoutCmdArguments) > 0 {
+						timeoutCmd = exec.CommandContext(ctx, timeoutCmdString, strings.Split(timeoutCmdArguments, " ")...)
+					} else {
+						timeoutCmd = exec.CommandContext(ctx, timeoutCmdString)
+					}
+					err := timeoutCmd.Run()
+					if err != nil {
+						fmt.Println(err)
+					}
+				}
+				cancel()
+			case <-ctx.Done():
+				cancel()
+			}
+		}()
+	}
 
 	start := time.Now()
 	err := cmd.Run()
