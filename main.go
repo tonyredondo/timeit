@@ -64,6 +64,7 @@ type (
 )
 
 func main() {
+	fmt.Println("TimeIt by Tony Redondo\n")
 	cfg, err := loadConfiguration()
 	if err != nil {
 		fmt.Println(err)
