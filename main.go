@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	ddtesting "github.com/DataDog/dd-sdk-go-testing"
 	"github.com/montanaflynn/stats"
 	"github.com/olekukonko/tablewriter"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
@@ -95,8 +95,8 @@ func main() {
 
 func sendTraceData(resScenario []scenarioResult, cfg *config) {
 	if len(resScenario) > 0 {
-		tracer.Start(tracer.WithLogger(myLogger{}), tracer.WithAnalytics(true))
-		defer tracer.Stop()
+		finalizer := ddtesting.Initialize(tracer.WithLogger(myLogger{}), tracer.WithAnalytics(true))
+		defer finalizer()
 
 		for _, scenario := range resScenario {
 			var pName string
@@ -114,37 +114,32 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 				pArgs = *cfg.ProcessArguments
 			}
 
-			span := tracer.StartSpan("time-it", tracer.StartTime(scenario.start))
+			_, testFinish := ddtesting.StartCustomTestOrBenchmark(context.Background(), ddtesting.TestData{
+				Type:  ddtesting.TypeBenchmark,
+				Suite: fmt.Sprintf("time-it.%v", scenario.Name),
+				Name:  fmt.Sprintf("%v %v", pName, pArgs),
+				Options: []ddtesting.Option{
+					ddtesting.WithSpanOptions(
+						tracer.StartTime(scenario.start),
+						tracer.Tag("benchmark.job.description", scenario.Name),
+						tracer.Tag("benchmark.runs", cfg.Count),
+						tracer.Tag("benchmark.warmup_count", cfg.WarmUpCount),
+						tracer.Tag("benchmark.duration.mean", scenario.Mean),
+						tracer.Tag("benchmark.statistics.n", cfg.Count),
+						tracer.Tag("benchmark.statistics.mean", scenario.Mean),
+						tracer.Tag("benchmark.statistics.std_dev", scenario.Stdev),
+						tracer.Tag("benchmark.statistics.p90", scenario.P90),
+						tracer.Tag("benchmark.statistics.p95", scenario.P95),
+						tracer.Tag("benchmark.statistics.p99", scenario.P99),
+						tracer.Tag("benchmark.statistics.outliers", len(scenario.Outliers)),
+						tracer.Tag("process.name", pName),
+						tracer.Tag("process.arguments", pArgs),
+					),
+					ddtesting.WithFinishOptions(tracer.FinishTime(scenario.end), tracer.WithError(scenario.error)),
+				},
+			})
 
-			for _, datum := range scenario.Data {
-				child := tracer.StartSpan("time-it-run", tracer.ChildOf(span.Context()), tracer.StartTime(datum.start))
-				child.SetTag(ext.ResourceName, fmt.Sprintf("%v execution of %v %v", scenario.Name, pName, pArgs))
-				child.SetTag(ext.ServiceName, pName)
-				child.SetTag(ext.SpanType, "benchmark")
-				child.SetTag(ext.AnalyticsEvent, true)
-				child.SetTag(ext.ManualKeep, true)
-				child.SetTag("process.name", pName)
-				child.SetTag("process.arguments", pArgs)
-				child.Finish(tracer.FinishTime(datum.end), tracer.WithError(datum.error))
-			}
-
-			span.SetTag(ext.ResourceName, fmt.Sprintf("%v (%v %v)", scenario.Name, pName, pArgs))
-			span.SetTag(ext.ServiceName, pName)
-			span.SetTag(ext.SpanType, "benchmark")
-			span.SetTag(ext.AnalyticsEvent, true)
-			span.SetTag(ext.ManualKeep, true)
-			span.SetTag("scenario.name", scenario.Name)
-			span.SetTag("scenario.mean", scenario.Mean)
-			span.SetTag("scenario.stdev", scenario.Stdev)
-			span.SetTag("scenario.p90", scenario.P90)
-			span.SetTag("scenario.p95", scenario.P95)
-			span.SetTag("scenario.p99", scenario.P99)
-			span.SetTag("scenario.outliers", len(scenario.Outliers))
-			span.SetTag("configuration.count", cfg.Count)
-			span.SetTag("configuration.warmup_count", cfg.WarmUpCount)
-			span.SetTag("process.name", pName)
-			span.SetTag("process.arguments", pArgs)
-			span.Finish(tracer.FinishTime(scenario.end), tracer.WithError(scenario.error))
+			testFinish(ddtesting.StatusPass, nil)
 		}
 	}
 }
