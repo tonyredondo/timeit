@@ -4,7 +4,7 @@ Command execution time meter allows to configure multiple scenarios to run bench
 ## Installation
 
 ```bash
-go get https://github.com/tonyredondo/timeit
+go get github.com/tonyredondo/timeit
 ```
 
 ### Usage
