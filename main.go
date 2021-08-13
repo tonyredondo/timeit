@@ -63,6 +63,8 @@ type (
 	myLogger struct{}
 )
 
+var currentWorkingDirectory *string
+
 func main() {
 	fmt.Println("TimeIt by Tony Redondo\n")
 	cfg, err := loadConfiguration()
@@ -78,18 +80,34 @@ func main() {
 
 	// process each scenario
 	var resScenario []scenarioResult
+	scenarioWithErrors := 0
 	if cfg.Count > 0 && len(cfg.Scenarios) > 0 {
 		for _, scenario := range cfg.Scenarios {
-			resScenario = append(resScenario, processScenario(&scenario, cfg))
+			res := processScenario(&scenario, cfg)
+			if res.error != nil {
+				scenarioWithErrors++
+			}
+			resScenario = append(resScenario, res)
 		}
 	}
 
-	// print results in a table
-	printResultsTable(resScenario, cfg)
+	if scenarioWithErrors < len(cfg.Scenarios) {
+		// print results in a table
+		printResultsTable(resScenario, cfg)
 
-	if cfg.EnableDatadog {
-		// send traces and span data
-		sendTraceData(resScenario, cfg)
+		if cfg.EnableDatadog {
+			// send traces and span data
+			sendTraceData(resScenario, cfg)
+		}
+	} else {
+		for scidx := 0; scidx < len(resScenario); scidx++ {
+			if resScenario[scidx].error != nil {
+				fmt.Printf("Error in Scenario: %v\n", scidx)
+				fmt.Println(resScenario[scidx].error.Error())
+			}
+		}
+
+		os.Exit(1)
 	}
 }
 
@@ -211,13 +229,6 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	}
 	summaryTable.Render()
 	fmt.Println()
-
-	for scidx := 0; scidx < len(resScenario); scidx++ {
-		if resScenario[scidx].error != nil {
-			fmt.Printf("Error in Scenario: %v\n", scidx)
-			fmt.Println(resScenario[scidx].error.Error())
-		}
-	}
 }
 
 func loadConfiguration() (*config, error) {
@@ -354,6 +365,7 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	} else if cfg.ProcessName != nil {
 		cmdString = *cfg.ProcessName
 	}
+	cmdString = replaceCustomVars(cmdString)
 
 	var cmdArguments string
 	if scenario.ProcessArguments != nil {
@@ -361,6 +373,7 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	} else if cfg.ProcessArguments != nil {
 		cmdArguments = *cfg.ProcessArguments
 	}
+	cmdArguments = replaceCustomVars(cmdArguments)
 
 	var workingDirectory string
 	if scenario.WorkingDirectory != nil {
@@ -368,12 +381,15 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	} else if cfg.WorkingDirectory != nil {
 		workingDirectory = *cfg.WorkingDirectory
 	}
+	workingDirectory = replaceCustomVars(workingDirectory)
 
 	cmdEnv := os.Environ()
 	for k, v := range cfg.EnvironmentVariables {
+		v = replaceCustomVars(v)
 		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", k, v))
 	}
 	for k, v := range scenario.EnvironmentVariables {
+		v = replaceCustomVars(v)
 		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", k, v))
 	}
 
@@ -390,6 +406,7 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	} else if cfg.Timeout.ProcessName != nil {
 		timeoutCmdString = *cfg.Timeout.ProcessName
 	}
+	timeoutCmdString = replaceCustomVars(timeoutCmdString)
 
 	var timeoutCmdArguments string
 	if scenario.Timeout.ProcessArguments != nil {
@@ -397,6 +414,7 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	} else if cfg.Timeout.ProcessArguments != nil {
 		timeoutCmdArguments = *cfg.Timeout.ProcessArguments
 	}
+	timeoutCmdArguments = replaceCustomVars(timeoutCmdArguments)
 
 	defer runtime.GC()
 
@@ -457,4 +475,14 @@ func (l myLogger) Log(msg string) {
 	if strings.Index(msg, "INFO:") == -1 {
 		fmt.Printf("%v\n", msg)
 	}
+}
+
+func replaceCustomVars(value string) string {
+	if currentWorkingDirectory == nil {
+		wd, _ := os.Getwd()
+		currentWorkingDirectory = &wd
+	}
+	value = strings.ReplaceAll(value, "$(CWD)", *currentWorkingDirectory)
+
+	return value
 }
