@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -37,6 +38,9 @@ type (
 	}
 	config struct {
 		processData
+		FilePath      string
+		Path          string
+		FileName      string
 		WarmUpCount   int        `json:"warmUpCount"`
 		Count         int        `json:"count"`
 		EnableDatadog bool       `json:"enableDatadog"`
@@ -135,7 +139,7 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			_, testFinish := ddtesting.StartCustomTestOrBenchmark(context.Background(), ddtesting.TestData{
 				Type:  ddtesting.TypeBenchmark,
 				Suite: fmt.Sprintf("time-it.%v", scenario.Name),
-				Name:  fmt.Sprintf("%v %v", pName, pArgs),
+				Name:  cfg.FilePath,
 				Options: []ddtesting.Option{
 					ddtesting.WithSpanOptions(
 						tracer.StartTime(scenario.start),
@@ -152,6 +156,11 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 						tracer.Tag("benchmark.statistics.outliers", len(scenario.Outliers)),
 						tracer.Tag("process.name", pName),
 						tracer.Tag("process.arguments", pArgs),
+						tracer.Tag("test.file.path", cfg.Path),
+						tracer.Tag("test.file.name", cfg.FileName),
+						tracer.Tag("test.file.file_path", cfg.FilePath),
+						tracer.Tag("test.scenario", scenario.Name),
+						tracer.Tag("test.framework", "time-it"),
 					),
 					ddtesting.WithFinishOptions(tracer.FinishTime(scenario.end), tracer.WithError(scenario.error)),
 				},
@@ -236,7 +245,9 @@ func loadConfiguration() (*config, error) {
 		return nil, errors.New("missing argument with the configuration file")
 	}
 
-	jsonFile, err := os.Open(os.Args[1])
+	configurationFilePath := os.Args[1]
+
+	jsonFile, err := os.Open(configurationFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +263,10 @@ func loadConfiguration() (*config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	cfg.FilePath = configurationFilePath
+	cfg.Path = filepath.Dir(configurationFilePath)
+	cfg.FileName = filepath.Base(configurationFilePath)
 
 	return &cfg, nil
 }
