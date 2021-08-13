@@ -31,6 +31,7 @@ type (
 		WorkingDirectory     *string           `json:"workingDirectory"`
 		EnvironmentVariables map[string]string `json:"environmentVariables"`
 		Timeout              timeout           `json:"timeout"`
+		Tags                 map[string]string `json:"tags"`
 	}
 	scenario struct {
 		processData
@@ -123,6 +124,7 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 		for _, scenario := range resScenario {
 			var pName string
 			var pArgs string
+			var tags map[string]string
 
 			if scenario.ProcessName != nil {
 				pName = *scenario.ProcessName
@@ -136,32 +138,41 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 				pArgs = *cfg.ProcessArguments
 			}
 
+			tags = cfg.Tags
+			for k, v := range scenario.Tags {
+				tags[k] = v
+			}
+
+			var startSpanOptions []tracer.StartSpanOption
+			startSpanOptions = append(startSpanOptions, tracer.StartTime(scenario.start))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.job.description", scenario.Name))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.runs", cfg.Count))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.warmup_count", cfg.WarmUpCount))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.duration.mean", scenario.Mean))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.n", cfg.Count))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.mean", scenario.Mean))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.std_dev", scenario.Stdev))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p90", scenario.P90))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p95", scenario.P95))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p99", scenario.P99))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.outliers", len(scenario.Outliers)))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("process.name", pName))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("process.arguments", pArgs))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("test.file.path", cfg.Path))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("test.file.name", cfg.FileName))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("test.file.file_path", cfg.FilePath))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("test.scenario", scenario.Name))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("test.framework", "time-it"))
+			for k, v := range tags {
+				startSpanOptions = append(startSpanOptions, tracer.Tag(k, v))
+			}
+
 			_, testFinish := ddtesting.StartCustomTestOrBenchmark(context.Background(), ddtesting.TestData{
 				Type:  ddtesting.TypeBenchmark,
 				Suite: fmt.Sprintf("time-it.%v", scenario.Name),
 				Name:  cfg.FilePath,
 				Options: []ddtesting.Option{
-					ddtesting.WithSpanOptions(
-						tracer.StartTime(scenario.start),
-						tracer.Tag("benchmark.job.description", scenario.Name),
-						tracer.Tag("benchmark.runs", cfg.Count),
-						tracer.Tag("benchmark.warmup_count", cfg.WarmUpCount),
-						tracer.Tag("benchmark.duration.mean", scenario.Mean),
-						tracer.Tag("benchmark.statistics.n", cfg.Count),
-						tracer.Tag("benchmark.statistics.mean", scenario.Mean),
-						tracer.Tag("benchmark.statistics.std_dev", scenario.Stdev),
-						tracer.Tag("benchmark.statistics.p90", scenario.P90),
-						tracer.Tag("benchmark.statistics.p95", scenario.P95),
-						tracer.Tag("benchmark.statistics.p99", scenario.P99),
-						tracer.Tag("benchmark.statistics.outliers", len(scenario.Outliers)),
-						tracer.Tag("process.name", pName),
-						tracer.Tag("process.arguments", pArgs),
-						tracer.Tag("test.file.path", cfg.Path),
-						tracer.Tag("test.file.name", cfg.FileName),
-						tracer.Tag("test.file.file_path", cfg.FilePath),
-						tracer.Tag("test.scenario", scenario.Name),
-						tracer.Tag("test.framework", "time-it"),
-					),
+					ddtesting.WithSpanOptions(startSpanOptions...),
 					ddtesting.WithFinishOptions(tracer.FinishTime(scenario.end), tracer.WithError(scenario.error)),
 				},
 			})
