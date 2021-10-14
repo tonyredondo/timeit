@@ -70,11 +70,12 @@ type (
 		MetricsData map[string][]float64
 	}
 	scenarioDataPoint struct {
-		start    time.Time
-		end      time.Time
-		duration time.Duration
-		metrics  map[string]float64
-		error    error
+		start          time.Time
+		end            time.Time
+		duration       time.Duration
+		metrics        map[string]float64
+		error          error
+		shouldContinue bool
 	}
 	metricsItem struct {
 		key   string
@@ -269,8 +270,9 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 			fmt.Sprint(len(resScenario[scidx].Outliers)),
 		})
 
-		if len(resScenario[scidx].MetricsData) > 0 {
-			for _, item := range orderByKey(resScenario[scidx].MetricsData) {
+		totalNum := len(resScenario[scidx].MetricsData)
+		if totalNum > 0 {
+			for idx, item := range orderByKey(resScenario[scidx].MetricsData) {
 				mMean, _ := stats.Mean(item.value)
 				mStdDev, _ := stats.StandardDeviation(item.value)
 				mStdErr := mStdDev / math.Sqrt(float64(len(resScenario[scidx].DataFloat)))
@@ -278,8 +280,15 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 				mP95, _ := stats.Percentile(item.value, 95)
 				mP90, _ := stats.Percentile(item.value, 90)
 
+				var name string
+				if idx < totalNum-1 {
+					name = fmt.Sprintf("├>%v", item.key)
+				} else {
+					name = fmt.Sprintf("└>%v", item.key)
+				}
+
 				summaryTable.Append([]string{
-					fmt.Sprintf("└>%v", item.key),
+					name,
 					fmt.Sprint(toFixed(mMean, 6)),
 					fmt.Sprint(toFixed(mStdDev, 6)),
 					fmt.Sprint(toFixed(mStdErr, 6)),
@@ -454,6 +463,9 @@ func runScenario(count int, scenario *scenario, cfg *config) []scenarioDataPoint
 	for i := 0; i < count; i++ {
 		currentRun := runProcessCmd(scenario, cfg)
 		res = append(res, currentRun)
+		if !currentRun.shouldContinue {
+			break
+		}
 		if currentRun.error != nil {
 			fmt.Print("x")
 		} else {
@@ -524,9 +536,9 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 
 	var metricsFilePath string
 	if scenario.MetricsFilePath != nil {
-		metricsFilePath = *scenario.MetricsFilePath
+		metricsFilePath = filepath.Join(workingDirectory, replaceCustomVars(*scenario.MetricsFilePath))
 	} else if cfg.MetricsFilePath != nil {
-		metricsFilePath = *cfg.MetricsFilePath
+		metricsFilePath = filepath.Join(workingDirectory, replaceCustomVars(*cfg.MetricsFilePath))
 	}
 
 	defer runtime.GC()
@@ -569,6 +581,7 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 		}()
 	}
 
+	shouldContinue := true
 	start := time.Now()
 	startDur := hrtime.Now()
 	err := cmd.Run()
@@ -581,9 +594,9 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 
 	metricsData := map[string]float64{}
 	if metricsFilePath != "" {
-		if _, err := os.Stat(metricsFilePath); err == nil {
-			data, err := os.ReadFile(metricsFilePath)
-			if err == nil {
+		if _, lerr := os.Stat(metricsFilePath); lerr == nil {
+			data, lerr := os.ReadFile(metricsFilePath)
+			if lerr == nil {
 				var metricsJson []map[string]string
 				_ = json.Unmarshal(data, &metricsJson)
 
@@ -595,15 +608,19 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 					}
 				}
 			}
+		} else if os.IsNotExist(lerr) {
+			err = errors.New(fmt.Sprintf("MetricsFilePath '%v' not found.", metricsFilePath))
+			shouldContinue = false
 		}
 	}
 
 	return scenarioDataPoint{
-		start:    start,
-		end:      end,
-		duration: endDur - startDur,
-		metrics:  metricsData,
-		error:    err,
+		start:          start,
+		end:            end,
+		duration:       endDur - startDur,
+		metrics:        metricsData,
+		error:          err,
+		shouldContinue: shouldContinue,
 	}
 }
 
