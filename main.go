@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +35,7 @@ type (
 		EnvironmentVariables map[string]string `json:"environmentVariables"`
 		Timeout              timeout           `json:"timeout"`
 		Tags                 map[string]string `json:"tags"`
+		MetricsFilePath      *string           `json:"metricsFilePath"`
 	}
 	scenario struct {
 		processData
@@ -50,20 +54,30 @@ type (
 	scenarioResult struct {
 		scenario
 		scenarioDataPoint
-		Data      []scenarioDataPoint
-		DataFloat []float64
-		Outliers  []float64
-		Mean      float64
-		Stdev     float64
-		P99       float64
-		P95       float64
-		P90       float64
+		Data        []scenarioDataPoint
+		DataFloat   []float64
+		Outliers    []float64
+		Mean        float64
+		Max         float64
+		Min         float64
+		Stdev       float64
+		StdErr      float64
+		P99         float64
+		P95         float64
+		P90         float64
+		Metrics     map[string]float64
+		MetricsData map[string][]float64
 	}
 	scenarioDataPoint struct {
 		start    time.Time
 		end      time.Time
 		duration time.Duration
+		metrics  map[string]float64
 		error    error
+	}
+	metricsItem struct {
+		key   string
+		value []float64
 	}
 	myLogger struct{}
 )
@@ -151,7 +165,10 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.duration.mean", scenario.Mean))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.n", cfg.Count))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.mean", scenario.Mean))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.max", scenario.Max))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.min", scenario.Min))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.std_dev", scenario.Stdev))
+			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.std_err", scenario.StdErr))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p90", scenario.P90))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p95", scenario.P95))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p99", scenario.P99))
@@ -165,6 +182,9 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			startSpanOptions = append(startSpanOptions, tracer.Tag("test.framework", "time-it"))
 			for k, v := range tags {
 				startSpanOptions = append(startSpanOptions, tracer.Tag(k, v))
+			}
+			for k, v := range scenario.Metrics {
+				startSpanOptions = append(startSpanOptions, tracer.Tag(fmt.Sprintf("benchmark.%v", k), v))
 			}
 
 			_, testFinish := ddtesting.StartCustomTestOrBenchmark(context.Background(), ddtesting.TestData{
@@ -235,17 +255,42 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	summaryTable := tablewriter.NewWriter(os.Stdout)
 	summaryTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	summaryTable.SetCenterSeparator("|")
-	summaryTable.SetHeader([]string{"Name", "Mean", "Stdev", "P99", "P95", "P90", "Outliers"})
+	summaryTable.SetHeader([]string{"Name", "Mean", "StdDev", "StdErr", "P99", "P95", "P90", "Outliers"})
 	for scidx := 0; scidx < len(resScenario); scidx++ {
 		summaryTable.Append([]string{
 			resScenario[scidx].Name,
 			fmt.Sprint(time.Duration(resScenario[scidx].Mean)),
 			fmt.Sprint(time.Duration(resScenario[scidx].Stdev)),
+			fmt.Sprint(time.Duration(resScenario[scidx].StdErr)),
 			fmt.Sprint(time.Duration(resScenario[scidx].P99)),
 			fmt.Sprint(time.Duration(resScenario[scidx].P95)),
 			fmt.Sprint(time.Duration(resScenario[scidx].P90)),
 			fmt.Sprint(len(resScenario[scidx].Outliers)),
 		})
+
+		if len(resScenario[scidx].MetricsData) > 0 {
+			for _, item := range orderByKey(resScenario[scidx].MetricsData) {
+				mMean, _ := stats.Mean(item.value)
+				mStdDev, _ := stats.StandardDeviation(item.value)
+				mStdErr := mStdDev / math.Sqrt(float64(len(resScenario[scidx].DataFloat)))
+				mP99, _ := stats.Percentile(item.value, 99)
+				mP95, _ := stats.Percentile(item.value, 95)
+				mP90, _ := stats.Percentile(item.value, 90)
+
+				summaryTable.Append([]string{
+					fmt.Sprintf("└─>%v", item.key),
+					fmt.Sprint(toFixed(mMean, 6)),
+					fmt.Sprint(toFixed(mStdDev, 6)),
+					fmt.Sprint(toFixed(mStdErr, 6)),
+					fmt.Sprint(toFixed(mP99, 6)),
+					fmt.Sprint(toFixed(mP95, 6)),
+					fmt.Sprint(toFixed(mP90, 6)),
+					"",
+				})
+			}
+
+			summaryTable.Append([]string{"", "", "", "", "", "", "", ""})
+		}
 	}
 	summaryTable.Render()
 	fmt.Println()
@@ -297,11 +342,15 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	fmt.Println()
 
 	var durations []float64
+	metricsData := map[string][]float64{}
 	mapErrors := make(map[string]bool)
 	for _, item := range res {
 		durations = append(durations, float64(item.duration))
 		if item.error != nil && item.error != context.DeadlineExceeded {
 			mapErrors[item.error.Error()] = true
+		}
+		for k, v := range item.metrics {
+			metricsData[k] = append(metricsData[k], v)
 		}
 	}
 	var errorString string
@@ -337,6 +386,8 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 
 	durations = newDurations
 	mean, _ := stats.Mean(durations)
+	max, _ := stats.Max(durations)
+	min, _ := stats.Min(durations)
 
 	// Add the missing datapoints removed from outliers
 	missingDurations := durationsCount - len(durations)
@@ -348,6 +399,29 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	p99, _ := stats.Percentile(durations, 99)
 	p95, _ := stats.Percentile(durations, 95)
 	p90, _ := stats.Percentile(durations, 90)
+	stderr := stdev / math.Sqrt(float64(durationsCount))
+
+	// Calculate metrics stats
+	metricsStats := map[string]float64{}
+	for k, v := range metricsData {
+		mMean, _ := stats.Mean(v)
+		mMax, _ := stats.Max(v)
+		mMin, _ := stats.Min(v)
+		mStdDev, _ := stats.StandardDeviation(v)
+		mStdErr := mStdDev / math.Sqrt(float64(durationsCount))
+		mP99, _ := stats.Percentile(v, 99)
+		mP95, _ := stats.Percentile(v, 95)
+		mP90, _ := stats.Percentile(v, 90)
+
+		metricsStats[fmt.Sprintf("%v.mean", k)] = mMean
+		metricsStats[fmt.Sprintf("%v.max", k)] = mMax
+		metricsStats[fmt.Sprintf("%v.min", k)] = mMin
+		metricsStats[fmt.Sprintf("%v.std_dev", k)] = mStdDev
+		metricsStats[fmt.Sprintf("%v.std_err", k)] = mStdErr
+		metricsStats[fmt.Sprintf("%v.p99", k)] = mP99
+		metricsStats[fmt.Sprintf("%v.p95", k)] = mP95
+		metricsStats[fmt.Sprintf("%v.p90", k)] = mP90
+	}
 
 	return scenarioResult{
 		scenario: *scenario,
@@ -357,14 +431,19 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 			duration: end.Sub(start),
 			error:    error,
 		},
-		Data:      res,
-		DataFloat: durations,
-		Outliers:  extremeOutliers,
-		Mean:      mean,
-		Stdev:     stdev,
-		P99:       p99,
-		P95:       p95,
-		P90:       p90,
+		Data:        res,
+		DataFloat:   durations,
+		Outliers:    extremeOutliers,
+		Mean:        mean,
+		Max:         max,
+		Min:         min,
+		Stdev:       stdev,
+		StdErr:      stderr,
+		P99:         p99,
+		P95:         p95,
+		P90:         p90,
+		Metrics:     metricsStats,
+		MetricsData: metricsData,
 	}
 }
 
@@ -442,6 +521,13 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 	timeoutCmdArguments = replaceCustomVars(timeoutCmdArguments)
 
+	var metricsFilePath string
+	if scenario.MetricsFilePath != nil {
+		metricsFilePath = *scenario.MetricsFilePath
+	} else if cfg.MetricsFilePath != nil {
+		metricsFilePath = *cfg.MetricsFilePath
+	}
+
 	defer runtime.GC()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -489,10 +575,31 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	if ctx.Err() == context.DeadlineExceeded {
 		err = ctx.Err()
 	}
+
+	metricsData := map[string]float64{}
+	if metricsFilePath != "" {
+		if _, err := os.Stat(metricsFilePath); err == nil {
+			data, err := os.ReadFile(metricsFilePath)
+			if err == nil {
+				var metricsJson []map[string]string
+				_ = json.Unmarshal(data, &metricsJson)
+
+				for _, item := range metricsJson {
+					for k, v := range item {
+						if s, err := strconv.ParseFloat(v, 64); err == nil {
+							metricsData[k] = s
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return scenarioDataPoint{
 		start:    start,
 		end:      end,
 		duration: end.Sub(start),
+		metrics:  metricsData,
 		error:    err,
 	}
 }
@@ -510,5 +617,28 @@ func replaceCustomVars(value string) string {
 	}
 	value = strings.ReplaceAll(value, "$(CWD)", *currentWorkingDirectory)
 
+	return value
+}
+
+func round(num float64) int {
+	return int(num + math.Copysign(0.5, num))
+}
+
+func toFixed(num float64, precision int) float64 {
+	output := math.Pow(10, float64(precision))
+	return float64(round(num*output)) / output
+}
+
+func orderByKey(data map[string][]float64) []metricsItem {
+	var value []metricsItem
+	for k, v := range data {
+		value = append(value, metricsItem{
+			key:   k,
+			value: v,
+		})
+	}
+	sort.Slice(value, func(i, j int) bool {
+		return value[i].key < value[j].key
+	})
 	return value
 }

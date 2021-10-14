@@ -1,0 +1,16 @@
+[
+  {"metric.runtime.dotnet.threads.contention_time":"1.6882"},
+  {"metric.runtime.dotnet.threads.contention_count":"1"},
+  {"metric.runtime.dotnet.gc.count.gen0":"75"},
+  {"metric.runtime.dotnet.gc.count.gen1":"0"},
+  {"metric.runtime.dotnet.gc.count.gen2":"1277"},
+  {"metric.runtime.dotnet.gc.count.compacting_gen2":"1"},
+  {"metric.runtime.dotnet.gc.pause_time":"250.74939999999984"},
+  {"metric.runtime.dotnet.gc.size.gen0":"3591296"},
+  {"metric.runtime.dotnet.gc.size.gen1":"656528"},
+  {"metric.runtime.dotnet.gc.size.gen2":"24"},
+  {"metric.runtime.dotnet.gc.size.loh":"12266504"},
+  {"metric.runtime.dotnet.gc.memory_load":"45"},
+  {"metric.runtime.process.processor_time":"8765.625"},
+  {"metric.runtime.process.private_bytes":"90808320"}
+]
