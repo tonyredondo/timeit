@@ -279,7 +279,7 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 				mP90, _ := stats.Percentile(item.value, 90)
 
 				summaryTable.Append([]string{
-					fmt.Sprintf("└─>%v", item.key),
+					fmt.Sprintf("└>%v", item.key),
 					fmt.Sprint(toFixed(mMean, 6)),
 					fmt.Sprint(toFixed(mStdDev, 6)),
 					fmt.Sprint(toFixed(mStdErr, 6)),
