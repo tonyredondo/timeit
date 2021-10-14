@@ -17,6 +17,7 @@ import (
 	"time"
 
 	ddtesting "github.com/DataDog/dd-sdk-go-testing"
+	"github.com/loov/hrtime"
 	"github.com/montanaflynn/stats"
 	"github.com/olekukonko/tablewriter"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
@@ -569,7 +570,9 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 
 	start := time.Now()
+	startDur := hrtime.Now()
 	err := cmd.Run()
+	endDur := hrtime.Now()
 	end := time.Now()
 
 	if ctx.Err() == context.DeadlineExceeded {
@@ -598,7 +601,7 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	return scenarioDataPoint{
 		start:    start,
 		end:      end,
-		duration: end.Sub(start),
+		duration: endDur - startDur,
 		metrics:  metricsData,
 		error:    err,
 	}
