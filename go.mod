@@ -9,7 +9,7 @@ require (
 	github.com/Microsoft/go-winio v0.5.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/loov/hrtime v1.0.3 // indirect
+	github.com/loov/hrtime v1.0.3
 	github.com/montanaflynn/stats v0.6.4
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/opentracing/opentracing-go v1.2.0 // indirect

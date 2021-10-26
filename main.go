@@ -5,53 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	ddtesting "github.com/DataDog/dd-sdk-go-testing"
 	"github.com/loov/hrtime"
 	"github.com/montanaflynn/stats"
 	"github.com/olekukonko/tablewriter"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
 type (
-	timeout struct {
-		MaxDuration      int     `json:"maxDuration"`
-		ProcessName      *string `json:"processName"`
-		ProcessArguments *string `json:"processArguments"`
-	}
-	processData struct {
-		ProcessName          *string           `json:"processName"`
-		ProcessArguments     *string           `json:"processArguments"`
-		WorkingDirectory     *string           `json:"workingDirectory"`
-		EnvironmentVariables map[string]string `json:"environmentVariables"`
-		Timeout              timeout           `json:"timeout"`
-		Tags                 map[string]string `json:"tags"`
-		MetricsFilePath      *string           `json:"metricsFilePath"`
-	}
-	scenario struct {
-		processData
-		Name string `json:"name"`
-	}
-	config struct {
-		processData
-		FilePath      string
-		Path          string
-		FileName      string
-		WarmUpCount   int        `json:"warmUpCount"`
-		Count         int        `json:"count"`
-		EnableDatadog bool       `json:"enableDatadog"`
-		Scenarios     []scenario `json:"scenarios"`
-	}
 	scenarioResult struct {
 		scenario
 		scenarioDataPoint
@@ -81,13 +48,12 @@ type (
 		key   string
 		value []float64
 	}
-	myLogger struct{}
 )
 
 var currentWorkingDirectory *string
 
 func main() {
-	fmt.Println("TimeIt by Tony Redondo\n")
+	fmt.Print("TimeIt by Tony Redondo\n\n")
 	cfg, err := loadConfiguration()
 	if err != nil {
 		fmt.Println(err)
@@ -132,80 +98,8 @@ func main() {
 	}
 }
 
-func sendTraceData(resScenario []scenarioResult, cfg *config) {
-	if len(resScenario) > 0 {
-		finalizer := ddtesting.Initialize(tracer.WithLogger(myLogger{}), tracer.WithAnalytics(true))
-		defer finalizer()
-
-		for _, scenario := range resScenario {
-			var pName string
-			var pArgs string
-			var tags map[string]string
-
-			if scenario.ProcessName != nil {
-				pName = *scenario.ProcessName
-			} else if cfg.ProcessName != nil {
-				pName = *cfg.ProcessName
-			}
-
-			if scenario.ProcessArguments != nil {
-				pArgs = *scenario.ProcessArguments
-			} else if cfg.ProcessArguments != nil {
-				pArgs = *cfg.ProcessArguments
-			}
-
-			tags = cfg.Tags
-			for k, v := range scenario.Tags {
-				tags[k] = v
-			}
-
-			var startSpanOptions []tracer.StartSpanOption
-			startSpanOptions = append(startSpanOptions, tracer.StartTime(scenario.start))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.job.description", scenario.Name))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.runs", cfg.Count))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.warmup_count", cfg.WarmUpCount))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.duration.mean", scenario.Mean))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.n", cfg.Count))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.mean", scenario.Mean))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.max", scenario.Max))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.min", scenario.Min))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.std_dev", scenario.Stdev))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.std_err", scenario.StdErr))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p90", scenario.P90))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p95", scenario.P95))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.p99", scenario.P99))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.statistics.outliers", len(scenario.Outliers)))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("process.name", pName))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("process.arguments", pArgs))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("test.file.path", cfg.Path))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("test.file.name", cfg.FileName))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("test.file.file_path", cfg.FilePath))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("test.scenario", scenario.Name))
-			startSpanOptions = append(startSpanOptions, tracer.Tag("test.framework", "time-it"))
-			for k, v := range tags {
-				startSpanOptions = append(startSpanOptions, tracer.Tag(k, v))
-			}
-			for k, v := range scenario.Metrics {
-				startSpanOptions = append(startSpanOptions, tracer.Tag(fmt.Sprintf("benchmark.%v", k), v))
-			}
-
-			_, testFinish := ddtesting.StartCustomTestOrBenchmark(context.Background(), ddtesting.TestData{
-				Type:  ddtesting.TypeBenchmark,
-				Suite: fmt.Sprintf("time-it.%v", scenario.Name),
-				Name:  cfg.FilePath,
-				Options: []ddtesting.Option{
-					ddtesting.WithSpanOptions(startSpanOptions...),
-					ddtesting.WithFinishOptions(tracer.FinishTime(scenario.end), tracer.WithError(scenario.error)),
-				},
-			})
-
-			testFinish(ddtesting.StatusPass, nil)
-		}
-	}
-}
-
 func printResultsTable(resScenario []scenarioResult, cfg *config) {
-	fmt.Println("\n### Results\n")
+	fmt.Print("\n### Results\n\n")
 	resultTable := tablewriter.NewWriter(os.Stdout)
 	resultTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	resultTable.SetCenterSeparator("|")
@@ -225,7 +119,7 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	}
 	resultTable.Render()
 
-	fmt.Println("\n### Outliers\n")
+	fmt.Print("\n### Outliers\n\n")
 	outliersTable := tablewriter.NewWriter(os.Stdout)
 	outliersTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	outliersTable.SetCenterSeparator("|")
@@ -253,7 +147,7 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	}
 	outliersTable.Render()
 
-	fmt.Println("\n### Summary\n")
+	fmt.Print("\n### Summary\n\n")
 	summaryTable := tablewriter.NewWriter(os.Stdout)
 	summaryTable.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	summaryTable.SetCenterSeparator("|")
@@ -304,37 +198,6 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	}
 	summaryTable.Render()
 	fmt.Println()
-}
-
-func loadConfiguration() (*config, error) {
-	if len(os.Args) < 2 {
-		return nil, errors.New("missing argument with the configuration file")
-	}
-
-	configurationFilePath := os.Args[1]
-
-	jsonFile, err := os.Open(configurationFilePath)
-	if err != nil {
-		return nil, err
-	}
-	defer jsonFile.Close()
-
-	jsonBytes, err2 := ioutil.ReadAll(jsonFile)
-	if err2 != nil {
-		return nil, err2
-	}
-
-	var cfg config
-	err = json.Unmarshal(jsonBytes, &cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	cfg.FilePath = configurationFilePath
-	cfg.Path = filepath.Dir(configurationFilePath)
-	cfg.FileName = filepath.Base(configurationFilePath)
-
-	return &cfg, nil
 }
 
 func processScenario(scenario *scenario, cfg *config) scenarioResult {
@@ -534,11 +397,11 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 	timeoutCmdArguments = replaceCustomVars(timeoutCmdArguments)
 
-	var metricsFilePath string
+	var metricsFilesPath []string
 	if scenario.MetricsFilePath != nil {
-		metricsFilePath = filepath.Join(workingDirectory, replaceCustomVars(*scenario.MetricsFilePath))
+		metricsFilesPath = resolveWildcard(*scenario.MetricsFilePath, workingDirectory)
 	} else if cfg.MetricsFilePath != nil {
-		metricsFilePath = filepath.Join(workingDirectory, replaceCustomVars(*cfg.MetricsFilePath))
+		metricsFilesPath = resolveWildcard(*cfg.MetricsFilePath, workingDirectory)
 	}
 
 	defer runtime.GC()
@@ -593,24 +456,26 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 
 	metricsData := map[string]float64{}
-	if metricsFilePath != "" {
-		if _, lerr := os.Stat(metricsFilePath); lerr == nil {
-			data, lerr := os.ReadFile(metricsFilePath)
-			if lerr == nil {
-				var metricsJson []map[string]string
-				_ = json.Unmarshal(data, &metricsJson)
+	if len(metricsFilesPath) > 0 {
+		for _, metricsFilePath := range metricsFilesPath {
+			if _, lerr := os.Stat(metricsFilePath); lerr == nil {
+				data, lerr := os.ReadFile(metricsFilePath)
+				if lerr == nil {
+					var metricsJson []map[string]string
+					_ = json.Unmarshal(data, &metricsJson)
 
-				for _, item := range metricsJson {
-					for k, v := range item {
-						if s, err := strconv.ParseFloat(v, 64); err == nil {
-							metricsData[k] = s
+					for _, item := range metricsJson {
+						for k, v := range item {
+							if s, err := strconv.ParseFloat(v, 64); err == nil {
+								metricsData[k] = s
+							}
 						}
 					}
 				}
+			} else if os.IsNotExist(lerr) {
+				err = errors.New(fmt.Sprintf("MetricsFilePath '%v' not found.", metricsFilePath))
+				shouldContinue = false
 			}
-		} else if os.IsNotExist(lerr) {
-			err = errors.New(fmt.Sprintf("MetricsFilePath '%v' not found.", metricsFilePath))
-			shouldContinue = false
 		}
 	}
 
@@ -622,43 +487,4 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 		error:          err,
 		shouldContinue: shouldContinue,
 	}
-}
-
-func (l myLogger) Log(msg string) {
-	if strings.Index(msg, "INFO:") == -1 {
-		fmt.Printf("%v\n", msg)
-	}
-}
-
-func replaceCustomVars(value string) string {
-	if currentWorkingDirectory == nil {
-		wd, _ := os.Getwd()
-		currentWorkingDirectory = &wd
-	}
-	value = strings.ReplaceAll(value, "$(CWD)", *currentWorkingDirectory)
-
-	return value
-}
-
-func round(num float64) int {
-	return int(num + math.Copysign(0.5, num))
-}
-
-func toFixed(num float64, precision int) float64 {
-	output := math.Pow(10, float64(precision))
-	return float64(round(num*output)) / output
-}
-
-func orderByKey(data map[string][]float64) []metricsItem {
-	var value []metricsItem
-	for k, v := range data {
-		value = append(value, metricsItem{
-			key:   k,
-			value: v,
-		})
-	}
-	sort.Slice(value, func(i, j int) bool {
-		return value[i].key < value[j].key
-	})
-	return value
 }
