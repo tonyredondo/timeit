@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -444,6 +445,10 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 		}()
 	}
 
+	var b bytes.Buffer
+	cmd.Stdout = &b
+	cmd.Stderr = &b
+
 	shouldContinue := true
 	start := time.Now()
 	startDur := hrtime.Now()
@@ -453,6 +458,8 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 
 	if ctx.Err() == context.DeadlineExceeded {
 		err = ctx.Err()
+	} else if err != nil {
+		err = errors.New(fmt.Sprintf("\n%s%s", b.String(), err.Error()))
 	}
 
 	metricsData := map[string]float64{}
