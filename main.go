@@ -398,13 +398,6 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 	timeoutCmdArguments = replaceCustomVars(timeoutCmdArguments)
 
-	var metricsFilesPath []string
-	if scenario.MetricsFilePath != nil {
-		metricsFilesPath = resolveWildcard(*scenario.MetricsFilePath, workingDirectory)
-	} else if cfg.MetricsFilePath != nil {
-		metricsFilesPath = resolveWildcard(*cfg.MetricsFilePath, workingDirectory)
-	}
-
 	defer runtime.GC()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -460,6 +453,15 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 		err = ctx.Err()
 	} else if err != nil {
 		err = errors.New(fmt.Sprintf("\n%s%s", b.String(), err.Error()))
+	}
+
+	// Since metrics file(s) are created during or at the end of the process
+	// we have to look for them once the process is finished
+	var metricsFilesPath []string
+	if scenario.MetricsFilePath != nil {
+		metricsFilesPath = resolveWildcard(*scenario.MetricsFilePath, workingDirectory)
+	} else if cfg.MetricsFilePath != nil {
+		metricsFilesPath = resolveWildcard(*cfg.MetricsFilePath, workingDirectory)
 	}
 
 	metricsData := map[string]float64{}
