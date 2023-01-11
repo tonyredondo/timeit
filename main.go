@@ -23,26 +23,26 @@ type (
 	scenarioResult struct {
 		scenario
 		scenarioDataPoint
-		Data        []scenarioDataPoint
-		DataFloat   []float64
-		Outliers    []float64
-		Mean        float64
-		Max         float64
-		Min         float64
-		Stdev       float64
-		StdErr      float64
-		P99         float64
-		P95         float64
-		P90         float64
-		Metrics     map[string]float64
-		MetricsData map[string][]float64
+		Data        []scenarioDataPoint  `json:"data"`
+		DataFloat   []float64            `json:"durations"`
+		Outliers    []float64            `json:"outliers"`
+		Mean        float64              `json:"mean"`
+		Max         float64              `json:"max"`
+		Min         float64              `json:"min"`
+		Stdev       float64              `json:"stdev"`
+		StdErr      float64              `json:"stderr"`
+		P99         float64              `json:"p99"`
+		P95         float64              `json:"p95"`
+		P90         float64              `json:"p90"`
+		Metrics     map[string]float64   `json:"metrics"`
+		MetricsData map[string][]float64 `json:"metricsData"`
 	}
 	scenarioDataPoint struct {
-		start          time.Time
-		end            time.Time
-		duration       time.Duration
+		Start          time.Time     `json:"start"`
+		End            time.Time     `json:"end"`
+		Duration       time.Duration `json:"duration"`
+		Error          error         `json:"error"`
 		metrics        map[string]float64
-		error          error
 		shouldContinue bool
 	}
 	metricsItem struct {
@@ -52,6 +52,7 @@ type (
 )
 
 var currentWorkingDirectory *string
+var exporters []Exporter
 
 func main() {
 	fmt.Print("TimeIt by Tony Redondo\n\n")
@@ -61,6 +62,8 @@ func main() {
 		os.Exit(-1)
 		return
 	}
+
+	exporters = append(exporters, newDatadogExporter(), newJsonExporter())
 
 	fmt.Printf("Warmup count: %v\n", cfg.WarmUpCount)
 	fmt.Printf("Count: %v\n", cfg.Count)
@@ -72,7 +75,7 @@ func main() {
 	if cfg.Count > 0 && len(cfg.Scenarios) > 0 {
 		for _, scenario := range cfg.Scenarios {
 			res := processScenario(&scenario, cfg)
-			if res.error != nil {
+			if res.Error != nil {
 				scenarioWithErrors++
 			}
 			resScenario = append(resScenario, res)
@@ -83,15 +86,19 @@ func main() {
 		// print results in a table
 		printResultsTable(resScenario, cfg)
 
-		if cfg.EnableDatadog {
-			// send traces and span data
-			sendTraceData(resScenario, cfg)
+		// Export data
+		for _, ex := range exporters {
+			ex.SetConfiguration(cfg)
+			if ex.IsEnabled() {
+				ex.Export(resScenario)
+			}
 		}
+
 	} else {
 		for scidx := 0; scidx < len(resScenario); scidx++ {
-			if resScenario[scidx].error != nil {
+			if resScenario[scidx].Error != nil {
 				fmt.Printf("Error in Scenario: %v\n", scidx)
-				fmt.Println(resScenario[scidx].error.Error())
+				fmt.Println(resScenario[scidx].Error.Error())
 			}
 		}
 
@@ -219,9 +226,9 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	metricsData := map[string][]float64{}
 	mapErrors := make(map[string]bool)
 	for _, item := range res {
-		durations = append(durations, float64(item.duration))
-		if item.error != nil && item.error != context.DeadlineExceeded {
-			mapErrors[item.error.Error()] = true
+		durations = append(durations, float64(item.Duration))
+		if item.Error != nil && item.Error != context.DeadlineExceeded {
+			mapErrors[item.Error.Error()] = true
 		}
 		for k, v := range item.metrics {
 			metricsData[k] = append(metricsData[k], v)
@@ -300,10 +307,10 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 	return scenarioResult{
 		scenario: *scenario,
 		scenarioDataPoint: scenarioDataPoint{
-			start:    start,
-			end:      end,
-			duration: end.Sub(start),
-			error:    error,
+			Start:    start,
+			End:      end,
+			Duration: end.Sub(start),
+			Error:    error,
 		},
 		Data:        res,
 		DataFloat:   durations,
@@ -330,7 +337,7 @@ func runScenario(count int, scenario *scenario, cfg *config) []scenarioDataPoint
 		if !currentRun.shouldContinue {
 			break
 		}
-		if currentRun.error != nil {
+		if currentRun.Error != nil {
 			fmt.Print("x")
 		} else {
 			fmt.Print(".")
@@ -489,11 +496,11 @@ func runProcessCmd(scenario *scenario, cfg *config) scenarioDataPoint {
 	}
 
 	return scenarioDataPoint{
-		start:          start,
-		end:            end,
-		duration:       endDur - startDur,
+		Start:          start,
+		End:            end,
+		Duration:       endDur - startDur,
+		Error:          err,
 		metrics:        metricsData,
-		error:          err,
 		shouldContinue: shouldContinue,
 	}
 }

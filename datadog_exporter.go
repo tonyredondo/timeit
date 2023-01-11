@@ -8,10 +8,28 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
-func sendTraceData(resScenario []scenarioResult, cfg *config) {
+type datadogExporter struct {
+	configuration *config
+}
+
+func newDatadogExporter() Exporter {
+	return new(datadogExporter)
+}
+
+func (de *datadogExporter) SetConfiguration(configuration *config) {
+	de.configuration = configuration
+}
+
+func (de *datadogExporter) IsEnabled() bool {
+	return de.configuration.EnableDatadog
+}
+
+func (de *datadogExporter) Export(resScenario []scenarioResult) {
 	if len(resScenario) > 0 {
 		finalizer := ddtesting.Initialize(tracer.WithLogger(myLogger{}), tracer.WithAnalytics(true))
 		defer finalizer()
+
+		cfg := de.configuration
 
 		for _, scenario := range resScenario {
 			var pName string
@@ -36,7 +54,7 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 			}
 
 			var startSpanOptions []tracer.StartSpanOption
-			startSpanOptions = append(startSpanOptions, tracer.StartTime(scenario.start))
+			startSpanOptions = append(startSpanOptions, tracer.StartTime(scenario.Start))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.job.description", scenario.Name))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.runs", cfg.Count))
 			startSpanOptions = append(startSpanOptions, tracer.Tag("benchmark.warmup_count", cfg.WarmUpCount))
@@ -71,7 +89,7 @@ func sendTraceData(resScenario []scenarioResult, cfg *config) {
 				Name:  cfg.FilePath,
 				Options: []ddtesting.Option{
 					ddtesting.WithSpanOptions(startSpanOptions...),
-					ddtesting.WithFinishOptions(tracer.FinishTime(scenario.end), tracer.WithError(scenario.error)),
+					ddtesting.WithFinishOptions(tracer.FinishTime(scenario.End), tracer.WithError(scenario.Error)),
 				},
 			})
 
