@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -29,13 +29,14 @@ type (
 	}
 	config struct {
 		processData
-		FilePath      string
-		Path          string
-		FileName      string
-		WarmUpCount   int        `json:"warmUpCount"`
-		Count         int        `json:"count"`
-		EnableDatadog bool       `json:"enableDatadog"`
-		Scenarios     []scenario `json:"scenarios"`
+		FilePath             string
+		Path                 string
+		FileName             string
+		WarmUpCount          int        `json:"warmUpCount"`
+		Count                int        `json:"count"`
+		EnableDatadog        bool       `json:"enableDatadog"`
+		Scenarios            []scenario `json:"scenarios"`
+		JsonExporterFilePath string     `json:"jsonExporterFilePath"`
 	}
 )
 
@@ -52,7 +53,7 @@ func loadConfiguration() (*config, error) {
 	}
 	defer jsonFile.Close()
 
-	jsonBytes, err2 := ioutil.ReadAll(jsonFile)
+	jsonBytes, err2 := io.ReadAll(jsonFile)
 	if err2 != nil {
 		return nil, err2
 	}

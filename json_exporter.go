@@ -25,18 +25,21 @@ func (de *jsonExporter) IsEnabled() bool {
 }
 
 func (de *jsonExporter) Export(resScenario []scenarioResult) {
-	jsonData, err := json.Marshal(resScenario)
+	jsonData, err := json.MarshalIndent(resScenario, "", "  ")
 	if err != nil {
 		fmt.Printf("Error exporting to json: %v\n", err)
 		return
 	}
 
-	outputFile := filepath.Join(de.configuration.Path, fmt.Sprintf("jsonexporter_%d.json", rand.Int()))
+	outputFile := de.configuration.JsonExporterFilePath
+	if outputFile == "" {
+		outputFile = filepath.Join(de.configuration.Path, fmt.Sprintf("jsonexporter_%d.json", rand.Int()))
+	}
 	err = os.WriteFile(outputFile, jsonData, os.ModePerm)
 	if err != nil {
 		fmt.Printf("Error exporting to json: %v\n", err)
 		return
 	}
 
-	fmt.Printf("The Json file '%s' was exported.", outputFile)
+	fmt.Printf("The Json file '%s' was exported.\n", outputFile)
 }
