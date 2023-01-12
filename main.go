@@ -315,12 +315,34 @@ func runScenario(count int, scenario *scenario) []scenarioDataPoint {
 }
 
 func runProcessCmd(sce *scenario) scenarioDataPoint {
-	cmdString := *sce.ProcessName
-	cmdArguments := *sce.ProcessArguments
-	workingDirectory := *sce.WorkingDirectory
+	var cmdString string
+	var cmdArguments string
+	var workingDirectory string
+	var timeoutCmdString string
+	var timeoutCmdArguments string
+
+	if sce.ProcessName != nil {
+		cmdString = *sce.ProcessName
+	}
+
+	if sce.ProcessArguments != nil {
+		cmdArguments = *sce.ProcessArguments
+	}
+
+	if sce.WorkingDirectory != nil {
+		workingDirectory = *sce.WorkingDirectory
+	}
+
 	cmdTimeout := sce.Timeout.MaxDuration
-	timeoutCmdString := *sce.Timeout.ProcessName
-	timeoutCmdArguments := *sce.Timeout.ProcessArguments
+
+	if sce.Timeout.ProcessName != nil {
+		timeoutCmdString = *sce.Timeout.ProcessName
+	}
+
+	if sce.Timeout.ProcessArguments != nil {
+		timeoutCmdArguments = *sce.Timeout.ProcessArguments
+	}
+
 	cmdEnv := os.Environ()
 	for k, v := range sce.EnvironmentVariables {
 		cmdEnv = append(cmdEnv, fmt.Sprintf("%s=%s", k, v))
