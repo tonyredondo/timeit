@@ -230,17 +230,11 @@ func processScenario(scenario *scenario, cfg *config) scenarioResult {
 		}
 	}
 
+	// Calculate stats
 	durations = newDurations
 	mean, _ := stats.Mean(durations)
 	max, _ := stats.Max(durations)
 	min, _ := stats.Min(durations)
-
-	// Add the missing datapoints removed from outliers
-	missingDurations := durationsCount - len(durations)
-	for i := 0; i < missingDurations; i++ {
-		durations = append(durations, mean)
-	}
-
 	stdev, _ := stats.StandardDeviation(durations)
 	p99, _ := stats.Percentile(durations, 99)
 	p95, _ := stats.Percentile(durations, 95)
@@ -461,7 +455,12 @@ func printResultsTable(resScenario []scenarioResult, cfg *config) {
 	for idx := 0; idx < cfg.Count; idx++ {
 		var resultRow []string
 		for scidx := 0; scidx < len(resScenario); scidx++ {
-			resultRow = append(resultRow, fmt.Sprint(time.Duration(resScenario[scidx].DataFloat[idx])))
+			cScenario := resScenario[scidx]
+			if idx < len(cScenario.DataFloat) {
+				resultRow = append(resultRow, fmt.Sprint(time.Duration(cScenario.DataFloat[idx])))
+			} else {
+				resultRow = append(resultRow, " - ")
+			}
 		}
 		resultTable.Append(resultRow)
 	}
